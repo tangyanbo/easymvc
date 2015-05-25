@@ -1,0 +1,15 @@
+1. 支持将客户端参数封装成对象
+2. 支持注解，配置controller和方法
+3. 提供request和response的访问
+4. 支持jstl
+5. 可配置编码
+6. controller方法的参数可以任意调换
+7. 404报错提醒
+
+
+未完成功能
+bean validate
+参数的递归封装
+input错误
+类型转换，如date,long,double,int,string
+集成spring

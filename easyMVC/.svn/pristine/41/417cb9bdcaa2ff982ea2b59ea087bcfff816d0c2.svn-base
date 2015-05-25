@@ -1,0 +1,15 @@
+package com.easymvc.converter;
+
+/**
+ * StringConverter
+ * @author 唐延波
+ * @date 2015-5-19
+ */
+public class StringConverter implements Converter {
+
+	@Override
+	public Object[] convert(String[] params) {
+		return params;
+	}
+
+}

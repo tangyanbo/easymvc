@@ -1,0 +1,44 @@
+package com.easymvc.converter;
+
+import com.easymvc.exception.DataTypeNotSupportException;
+
+/**
+ * @author 唐延波
+ * @date 2015-5-19
+ */
+public class ConverterManager {
+	
+	private static final ConverterManager converterManager = new ConverterManager();
+	
+	public static ConverterManager getInstance(){
+		return converterManager;
+	} 
+	
+
+	/**
+	 * 使用策略模式
+	 * 类型转换
+	 * @author 唐延波
+	 * @date 2015-5-19
+	 * @param param
+	 * @param type
+	 * @return
+	 */
+	public Object[] convert(String[] params,Class<?> type){
+		if(type.getName().equals("java.lang.Long")
+				||type.getName().equals("long")){
+			LongConverter converter = new LongConverter();
+			return converter.convert(params);
+		}else if(type.getName().equals("java.lang.String")){
+			StringConverter converter = new StringConverter();
+			return converter.convert(params);
+		}else if(type.getName().equals("java.lang.Integer")
+				||type.getName().equals("int")){
+			IntegerConverter converter = new IntegerConverter();
+			return converter.convert(params);
+		}
+		else{
+			throw new DataTypeNotSupportException("不支持的类型:"+type.getName());
+		}
+	}
+}

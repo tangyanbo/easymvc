@@ -1,0 +1,50 @@
+package com.easymvc.converter;
+
+import java.text.DateFormat;
+import java.text.ParseException;
+import java.util.Date;
+
+import com.easymvc.exception.ConvertException;
+import com.easymvc.util.StringUtil;
+
+/**
+ * DateConverter
+ * @author 唐延波
+ * @date 2015-5-19
+ */
+public class DateConverter implements Converter {	
+
+	@Override
+	public Object[] convert(final String[] params) {	
+		if(StringUtil.isEmpty(params)){
+			return null;
+		}
+		Object[] values = new Object[params.length];
+		DateFormat f = DateFormat.getDateInstance();
+		for(int i=0;i<values.length;i++){
+			String dateStr = (String)params[i];
+			if(dateStr.equals("")){
+				continue;
+			}
+			try {
+				Date date = f.parse(dateStr);
+				values[i] = date;
+			} catch (ParseException e) {
+				throw new ConvertException(e.getMessage(),e);
+			}
+		}		
+		return values;		
+	}
+
+	public static void main(String[] args) throws ParseException {
+		DateFormat f = DateFormat.getDateInstance();
+		Date date = f.parse("2014-05-20 14:54:22");
+		System.out.println(date);
+		String[] args1 = {"2014-05-20 14:54:22"};
+		Object[] convert = new DateConverter().convert(args1);
+		System.out.println(convert[0]);
+		
+		String[] a = {""};
+		System.out.println();
+	}
+}

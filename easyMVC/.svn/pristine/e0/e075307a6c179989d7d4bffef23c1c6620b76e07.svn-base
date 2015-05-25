@@ -1,0 +1,19 @@
+package com.easymvc.converter;
+
+/**
+ * IntegerConverter
+ * @author 唐延波
+ * @date 2015-5-19
+ */
+public class IntegerConverter implements Converter{
+	
+	@Override
+	public Object[] convert(String[] params) {
+		Object[] values = new Object[params.length];
+		for(int i=0;i<values.length;i++){
+			values[i] = Integer.parseInt(params[i]);
+		}
+		return values;
+	}
+
+}

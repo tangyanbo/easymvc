@@ -1,0 +1,398 @@
+package com.easymvc.business;
+
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.Map;
+
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.easymvc.beans.BeanFactory;
+import com.easymvc.config.ConfigManager;
+import com.easymvc.config.ControllerMethod;
+import com.easymvc.converter.ConverterManager;
+import com.easymvc.ui.ModelMap;
+
+/**
+ * @author 唐延波
+ * @date 2015-5-12
+ * 
+ */
+public class Business {
+	
+	private static final String MODEL = "com.easymvc.ui.Model";
+	
+	private static final String REQUEST = "javax.servlet.http.HttpServletRequest";
+	
+	private static final String RESPONSE = "javax.servlet.http.HttpServletResponse";
+
+	private static Logger log = LoggerFactory.getLogger(Business.class);
+
+	private HttpServletRequest request;
+
+	private HttpServletResponse response;
+	
+	/**
+	 * 请求的servletPath
+	 */
+	private String servletPath;
+	
+	/**
+	 * 请求的参数
+	 */
+	private Map<String, String[]> parameterMap;
+		
+	/**
+	 * 请求对应的controller
+	 */
+	private Object controller;
+	
+	/**
+	 * 设置request和response的编码
+	 */
+	private String charsetEncoding;
+	
+	/**
+	 * 请求对应的method
+	 */
+	private Method method;
+
+	public Business(HttpServletRequest request, HttpServletResponse response) {
+		this.request = request;
+		this.response = response;
+		servletPath = request.getServletPath();
+		charsetEncoding = ConfigManager.getInstance().getConstant("charsetEncoding");
+		this.init();
+	}
+	
+	/**
+	 * 初始化
+	 * @author 唐延波
+	 * @date 2015-5-13
+	 */
+	private void init(){		
+		try {
+			//设置编码
+			request.setCharacterEncoding(charsetEncoding);
+			//获取客户端传的参数
+			parameterMap = request.getParameterMap();
+			log.info("parameterMap:"+parameterMap.toString());
+			//根据请求的url获取controllerMethod
+			ControllerMethod controllerMethod = BeanFactory.getInstance()
+					.getBean(servletPath, ControllerMethod.class);
+			if(controllerMethod == null){				
+				return;
+			}
+			controller = controllerMethod.getController();
+			method = controllerMethod.getMethod();
+		} catch (Exception e) {
+			log.error(e.getMessage(), e);
+		}
+	}
+	
+	/**
+	 * 发送404错误
+	 * @author 唐延波
+	 * @date 2015-5-15
+	 * @throws IOException
+	 */
+	private void sendNotFoundErrorMsg() throws IOException{
+		response.setStatus(404);
+		response.setContentType("text/html; charset=" + charsetEncoding);
+		PrintWriter writer = response.getWriter();		
+		writer.write("404错误,"+servletPath+"对应的controller找不到");
+		writer.flush();
+		writer.close();
+	}
+
+	/**
+	 * 入口
+	 * @author 唐延波
+	 * @date 2015-5-14
+	 */
+	public void process() {
+		try {
+			ClassObjectEntry customerParamEntry = null;
+			ClassObjectEntry modelEntry = null;
+			// 将客户端参数设置到controller接收参数对象里面去
+			if(method == null){
+				sendNotFoundErrorMsg();
+				return;
+			}
+			Class<?>[] parameterTypes = method.getParameterTypes();
+			//参数对象数组
+			Object[] args = new Object[parameterTypes.length];
+			for(int i=0;i<parameterTypes.length;i++){
+				Class<?> parameterType = parameterTypes[i];
+				if(parameterType.getName().equals(MODEL)){
+					//设置model
+					modelEntry = new ClassObjectEntry(); 
+					modelEntry.setClassType(parameterType);
+					modelEntry.setObject(ModelMap.class.newInstance());		
+					args[i] = modelEntry.getObject();
+				}else if(parameterType.getName().equals(REQUEST)){
+					args[i] = this.request;
+				}else if(parameterType.getName().equals(RESPONSE)){
+					args[i] = this.response;
+				}else{		
+					Object paramObj = parameterType.newInstance();
+					customerParamEntry = new ClassObjectEntry();
+					customerParamEntry.setClassType(parameterType);
+					customerParamEntry.setObject(paramObj);
+					paramObj = wrapParameters(customerParamEntry);
+					args[i] = paramObj;
+				}
+			}
+			Object returnObj = method.invoke(controller, args);
+			setAttribute(modelEntry);
+			forward(returnObj);
+		} catch (Exception e) {
+			log.error(e.getMessage(), e);
+		}
+	}
+	
+	/**
+	 * 设置对象到request中
+	 * @author 唐延波
+	 * @date 2015-5-14
+	 * @param paramType
+	 * @param paramObj
+	 * @return
+	 * @throws Exception
+	 */
+	private void setAttribute(ClassObjectEntry modelEntry)
+			throws Exception {
+		if(modelEntry == null){
+			return;
+		}
+		Class<?> paramType = modelEntry.getClassType();
+		Object paramObj = modelEntry.getObject();
+		Method method = paramType.getMethod("asMap");
+		Map<String, Object> map = (Map<String, Object>) method.invoke(paramObj);
+		for(String key : map.keySet()){
+			Object value = map.get(key);
+			request.setAttribute(key, value);
+		}
+	}
+	
+	/**
+	 * 渲染jsp
+	 * @author 唐延波
+	 * @date 2015-5-14
+	 * @param returnObj
+	 * @throws IOException 
+	 * @throws ServletException 
+	 */
+	private void forward(Object returnObj) throws ServletException, IOException{
+		if(returnObj instanceof String){
+			String forward = (String)returnObj;
+			forward += ".jsp";
+			request.getRequestDispatcher(forward).forward(request, response);
+		}
+	}
+
+	/**
+	 * 将客户端参数设置到controller接收参数对象里面去
+	 * @author 唐延波
+	 * @date 2015-5-13
+	 * @param method
+	 * @throws Exception
+	 */
+	private Object wrapParameters(ClassObjectEntry customerParamEntry) throws Exception {
+		ObjTree objTree = initObjTree(customerParamEntry.getObject(),customerParamEntry.getClassType());		
+		//根据parameter进行参数对象的封装		
+		for(String key : parameterMap.keySet()){
+			System.out.println("key:"+key);
+			if(key.indexOf(".")==-1){
+				String[] values = parameterMap.get(key);
+				wrapSimpleParameters(key,values,objTree);		
+			}else{
+				String[] values = parameterMap.get(key);
+				System.out.println("key2:"+key);
+				wrapCustomerParameter(key,values,objTree);
+			}			
+		}
+		return objTree.getSelf();
+	}
+	
+	/**
+	 * 封装自定义类型的属性，如User,OrderInfo
+	 * @author 唐延波
+	 * @date 2015-5-20
+	 * @param paramKey
+	 * @param objTree
+	 * @throws Exception 
+	 */
+	private void wrapCustomerParameter(final String paramKey,String[] values,final ObjTree objTree) throws Exception{
+		ObjTree parentObjTree = objTree;
+		ObjTree fieldObjTree = null;
+		String[] keys = paramKey.split("\\.");
+		log.info("paramKey:"+paramKey);
+		for(int i=0;i<keys.length;i++){
+			if(i==keys.length-1){
+				//最后一个，表示调用set方法				
+				wrapSimpleParameters(keys[i],values,fieldObjTree);		
+			}else{
+				//属性是对象，需要调用get方法并创建新对象
+				Map<String, MethodEntry> getMethodMap = parentObjTree.getGetMethodMap();
+				Map<String, MethodEntry> setMethodMap = parentObjTree.getSetMethodMap();
+				Map<String, ObjTree> fields = parentObjTree.getFields();
+				//先检查fields中是否初始化了key对应的field
+				//如User.orderInfo 那么key是orderInfo	
+				//递归object tree
+				fieldObjTree = fields.get(keys[i]);				
+				if(fieldObjTree == null){							
+					String getMethodName = this.getGETMethodName(keys[i]);
+					MethodEntry getMethodEntry = getMethodMap.get(getMethodName);
+					if(getMethodEntry == null){
+						//表示该对象里面没有对应的属性，直接return
+						return;
+					}
+					Method getMethod = getMethodEntry.getMethod();
+					//获得getMethod的返回值类型
+					Class<?> returnType = getMethod.getReturnType();					
+					//实例化returnType
+					Object fieldInstance = returnType.newInstance();
+					fieldObjTree = this.initObjTree(fieldInstance, returnType);		
+					//通过调用parent的set方法将fieldInstance赋值到属性上
+					String setMethodName = this.getSETMethodName(keys[i]);
+					MethodEntry setMethodEntry = setMethodMap.get(setMethodName);
+					Method setMethod = setMethodEntry.getMethod();
+					setMethod.invoke(parentObjTree.getSelf(), fieldInstance);
+					//fieldObjTree升级为parent
+					parentObjTree = fieldObjTree;
+				}
+			}
+		}
+	
+	}
+	
+	/**
+	 * 初始化ObjTree
+	 * @author 唐延波
+	 * @date 2015-5-20
+	 */
+	private ObjTree initObjTree(Object obj,Class<?> classType){		
+		Object paramObj = obj;
+		Class<?> paramType = classType;
+		ObjTree objTree = new ObjTree();
+		objTree.setSelf(paramObj);
+		
+		// 自定义对象参数对象
+		Map<String, MethodEntry> setMethodMap = new HashMap<String, MethodEntry>();
+		Map<String, MethodEntry> getMethodMap = new HashMap<String, MethodEntry>();
+		// 将参数对象进行反射，并保存所有set方法
+		Method[] methods = paramType.getMethods();
+		for (Method meth : methods) {
+			String methodName = meth.getName();
+			if(methodName.startsWith("set")) {
+				//初始化所有的set方法
+				MethodEntry entry = new MethodEntry();
+				entry.setMethod(meth);
+				entry.setOwnerObj(paramObj);
+				setMethodMap.put(meth.getName(), entry);
+			}else if(methodName.startsWith("get")){
+				//初始化所有的get方法
+				MethodEntry entry = new MethodEntry();
+				entry.setMethod(meth);
+				entry.setOwnerObj(paramObj);
+				getMethodMap.put(meth.getName(), entry);
+			}
+		}
+		objTree.setSetMethodMap(setMethodMap);	
+		objTree.setGetMethodMap(getMethodMap);		
+		return objTree;
+	}
+	
+	/**
+	 * 封装简单的属性，如String,int,long
+	 * @author 唐延波
+	 * @date 2015-5-20
+	 * @param key
+	 * @param objTree
+	 * @throws Exception 
+	 */
+	private void wrapSimpleParameters(String key,String[] values,ObjTree objTree) throws Exception{		
+		if(values == null){
+			return;
+		}
+		//获得set方法
+		String methodName = getSETMethodName(key);	
+		log.info("====="+methodName);
+		Map<String, MethodEntry> setMethodMap = objTree.getSetMethodMap();
+		MethodEntry methodEntry = setMethodMap.get(methodName);
+		if(methodEntry == null){
+			return;
+		}
+		Method method = methodEntry.getMethod();		
+		Class<?>[] setParameterTypes = method.getParameterTypes();
+		Class<?> setParameterType = setParameterTypes[0];
+		//类型转换
+		if(setParameterType.isArray()){
+			for(String value : values){
+				Object param = ConverterManager.getInstance().convert(values[0], setParameterType);
+				//TODO 
+				//暂不支持
+			}
+		}else{
+			Object param = ConverterManager.getInstance().convert(values[0], setParameterType);		
+			if(param!=null){
+				method.invoke(methodEntry.getOwnerObj(), param);	
+			}
+		}
+				
+	}
+	
+	/**
+	 * 获取set方法
+	 * 如输入name，得到setName
+	 * @author 唐延波
+	 * @date 2015-5-19
+	 * @param key
+	 * @return
+	 */
+	private String getSETMethodName(String key){
+		String firstLetter = key.substring(0,1);
+		String leftStr = key.substring(1);
+		String firstLetterUpper = firstLetter.toUpperCase();
+		String methodName = "set" + firstLetterUpper + leftStr;	
+		return methodName;
+	}
+	
+	/**
+	 * 获取get方法
+	 * 如输入name，得到getName
+	 * @author 唐延波
+	 * @date 2015-5-19
+	 * @param key
+	 * @return
+	 */
+	private String getGETMethodName(String key){
+		String firstLetter = key.substring(0,1);
+		String leftStr = key.substring(1);
+		String firstLetterUpper = firstLetter.toUpperCase();
+		String methodName = "get" + firstLetterUpper + leftStr;	
+		return methodName;
+	}
+	
+	public static void main(String[] args) throws ClassNotFoundException {
+		
+		class User{
+			public void test(int a,Integer b){
+				
+			}
+		}
+		Class<?> class1 = User.class;
+		Class<?>[] declaringClass = class1.getMethods()[0].getParameterTypes();
+		for(Class<?> class2 : declaringClass){
+			System.out.println(class2.getName());
+		}
+	}
+
+}
